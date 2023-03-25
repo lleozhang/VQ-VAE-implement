@@ -11,6 +11,7 @@ class ImageSet(Dataset):
     def __init__(self, path):
         Dataset.__init__(self)
         
+        self.path = path
         self.img_lis = os.listdir(path)
         self.len = len(self.lis)
         self.transform = Compose(
@@ -23,7 +24,7 @@ class ImageSet(Dataset):
         )
         
     def __getitem__(self, index):
-        img = Image.open(self.img_lis[index])
+        img = Image.open(self.path + self.img_lis[index])
         return self.transform(img)
     
     def __len__(self):
