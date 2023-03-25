@@ -2,47 +2,40 @@ import torch.nn as nn
 import torch
 from MLP import MLP
 from res_conv import Res_Conv
-
-def fea2cha(input, feature_dim, siz):
-    '''
-        convert a feature representation to a channel map
-        input: [bsz, patch_numer, feature_dim]
-        output: [bsz, feature_dim, H, W](H * W = patch_number)
-    '''
-    return input.transpose(1, 2).view(-1, feature_dim, siz, siz)
-
-def cha2fea(input, feature_dim, siz):
-    '''
-        convert a channel map to a feature representation
-        input: [bsz, C, H, W]
-        output: [bsz, H*W, C]
-    '''
-    return input.tranpose(1, 2).transpose(2, 3).view(-1, siz * siz, feature_dim)
+from utils import fea2cha, cha2fea
 
 class Decoder(nn.Module):
-    def __init__(self, token_dim, num_heads, dropout):
+    def __init__(self, token_dim, medium_dim, num_heads, dropout):
+        '''
+            To decode a feature map into an image
+            token_dim: same as Encoder
+            medium_dim: the number of channels while upsampling
+            num_heads: the number of heads
+            dropout: dropout        
+        '''
         nn.Module.__init__(self)
         self.self_att1 = nn.MultiheadAttention(token_dim, num_heads, dropout)
 
         self.token_dim = token_dim
+        self.medium_dim = medium_dim
         
         self.conv1 = Res_Conv(in_channels= token_dim, out_channels= token_dim, kernel_size= (5, 5))
         self.upsam1 = nn.Upsample((32, 32), mode = 'bilinear')
         self.mul_att1 = nn.MultiheadAttention(token_dim, num_heads, dropout)
         
-        self.conv2 = Res_Conv(in_channels= token_dim, out_channels= 100, kernel_size= (5, 5))
+        self.conv2 = Res_Conv(in_channels= token_dim, out_channels= medium_dim, kernel_size= (5, 5))
         self.upsam2 = nn.Upsample((64, 64), mode = 'bilinear')
-        self.self_att2 = nn.MultiheadAttention(100, num_heads, dropout)
+        self.self_att2 = nn.MultiheadAttention(medium_dim, num_heads, dropout)
         
-        self.conv3 = Res_Conv(in_channels= 100, out_channels= 100, kernel_size= (3, 3))
+        self.conv3 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
         self.upsam3 = nn.Upsample((128, 128), mode = 'bilinear')
-        self.mul_att2 = nn.MultiheadAttention(100, num_heads, dropout)
+        self.mul_att2 = nn.MultiheadAttention(medium_dim, num_heads, dropout)
         
-        self.conv4 = Res_Conv(in_channels= 100, out_channels= 100, kernel_size= (3, 3))
+        self.conv4 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
         self.upsam4 = nn.Upsample((224, 224), mode = 'bilinear')
-        self.mul_att3 = nn.MultiheadAttention(100, num_heads, dropout)
+        self.mul_att3 = nn.MultiheadAttention(medium_dim, num_heads, dropout)
         
-        self.conv5 = Res_Conv(in_channels= 100, out_channels= 3, kernel_size= (3, 3))
+        self.conv5 = Res_Conv(in_channels= medium_dim, out_channels= 3, kernel_size= (3, 3))
         self.conv6 = Res_Conv(in_channels= 3, out_channels= 3, kernel_size= (3, 3), activation= 'sigmoid')
         
     def forward(self, input):
@@ -69,26 +62,26 @@ class Decoder(nn.Module):
         conv2 = self.conv2(re_att_out1)
         upsam2 = self.upsam2(conv2)
         
-        re_upsam2 = cha2fea(upsam2, 100, 64)
-        re_conv2 = cha2fea(conv2, 100, 32)
+        re_upsam2 = cha2fea(upsam2, self.medium_dim, 64)
+        re_conv2 = cha2fea(conv2, self.medium_dim, 32)
         att_out2, _ = self.self_att2(re_conv2, re_upsam2, re_upsam2)
-        re_att_out2 = fea2cha(att_out2, 100, 64) + upsam2
+        re_att_out2 = fea2cha(att_out2, self.medium_dim, 64) + upsam2
         
         conv3 = self.conv3(re_att_out2)
         upsam3 = self.upsam3(conv3)
         
-        re_conv3 = cha2fea(conv3, 100, 64)
-        re_upsam3 = cha2fea(upsam3, 100, 128)
+        re_conv3 = cha2fea(conv3, self.medium_dim, 64)
+        re_upsam3 = cha2fea(upsam3, self.medium_dim, 128)
         att_out3, _ = self.mul_att2(re_conv2, re_upsam3, re_upsam3)
-        re_att_out3 = fea2cha(att_out3, 100, 128) + upsam3
+        re_att_out3 = fea2cha(att_out3, self.medium_dim, 128) + upsam3
 
         conv4 = self.conv4(re_att_out3)
         upsam4 = self.upsam4(conv4)
         
-        re_conv4 = cha2fea(conv4, 100, 128)
-        re_upsam4 = cha2fea(upsam4, 100, 224)
+        re_conv4 = cha2fea(conv4, self.medium_dim, 128)
+        re_upsam4 = cha2fea(upsam4, self.medium_dim, 224)
         att_out4, _ = self.mul_att3(re_conv3, re_upsam4, re_upsam4)
-        re_att_out4 = fea2cha(att_out4, 100, 224) + upsam4
+        re_att_out4 = fea2cha(att_out4, self.medium_dim, 224) + upsam4
 
         conv5 = self.conv5(re_att_out4)
         conv6 = self.conv6(conv5)

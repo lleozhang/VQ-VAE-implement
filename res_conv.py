@@ -13,15 +13,15 @@ class Res_Conv(nn.Module):
             self.norm = None
         
         if self.activation == 'relu':
-            self.act = nn.ReLU()
+            self.act = nn.ReLU(args)
         elif self.activation == 'leakyrelu':
             self.act = nn.LeakyReLU(args)
         elif self.activation == 'sigmoid':
-            self.act = nn.Sigmoid()
+            self.act = nn.Sigmoid(args)
         elif self.activation == 'tanh':
-            self.act = nn.Tanh()
+            self.act = nn.Tanh(args)
         elif self.activation == 'elu':
-            self.act = nn.ELU()
+            self.act = nn.ELU(args)
         else:
             self.act = None
         

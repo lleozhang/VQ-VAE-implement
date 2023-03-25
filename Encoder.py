@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision.models import vit_h_14, ViT_H_14_Weights
 from MLP import MLP
+from utils import fea2cha, cha2fea
 
 class Encoder(nn.Module):
     def __init__(self, token_size, token_dim = 1280):
@@ -12,18 +13,22 @@ class Encoder(nn.Module):
         '''
         nn.Module.__init__(self)
         self.encoder = vit_h_14(weights = ViT_H_14_Weights.DEFAULT)
+        self.li = nn.Linear(1280, token_dim)
+        
         for para in self.encoder.parameters():
             para.require_grad = False
         embedding = torch.randn((token_size, token_dim), requires_grad = True)
         self.embedding = nn.Parameter(embedding)
         self.register_parameter('Image Embedding', self.embedding)
+    
         
     def forward(self, img):
-        img_feature = self.encoder.encoder.layers(
+        img_feature = cha2fea(self.encoder.encoder.layers(
             self.encoder.encoder.dropout(
                 self.encoder.conv_proj(img)
-            ).transpose(1, 2).transpose(2, 3).view(-1, 16 * 16, 1280)
-        )#[bsz, 16 * 16, 1280]
+            )
+        ))#[bsz, 16 * 16, 1280]
+        img_feature = self.li(img_feature)
         
         #similarity between image and embedding tokens
         Sim = torch.matmul(img_feature/img_feature.norm(dim = -1).unsqueeze(2), 
