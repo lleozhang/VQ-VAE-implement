@@ -22,6 +22,7 @@ class VQ_VAE(nn.Module):
             input is a batch of images
             input: [bsz, C, H, W], C = 3, H = W = 224
         '''
-        enc_token, enc_fea = self.encoder(input)
-        output = self.decoder(enc_fea)
+        self.enc_token, self.enc_fea = self.encoder(input)
+        output = self.decoder(self.enc_fea)
+        
         return output

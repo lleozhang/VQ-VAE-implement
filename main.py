@@ -38,7 +38,7 @@ def train_model(model_path, dataset, batch_size, num_epochs,
     
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr = lr)
+    optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), lr = lr)
     criterion = nn.MSELoss()
     best_train = 1e10
     
@@ -58,8 +58,12 @@ def train_model(model_path, dataset, batch_size, num_epochs,
 
             #batch_loss = batch_loss.requires_grad_()
             optimizer.zero_grad()
+            model.enc_fea.retain_grad()
             batch_loss.backward()
+            model.encoder.update(model.enc_fea.grad)
             optimizer.step()
+            
+            
 
         if total_train_loss < best_train:
             best_train = total_train_loss

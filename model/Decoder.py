@@ -28,11 +28,11 @@ class Decoder(nn.Module):
         
         self.conv3 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
         self.upsam3 = nn.Upsample((128, 128), mode = 'bilinear')
-        self.self_att3 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
+        #self.self_att3 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
         
         self.conv4 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
         self.upsam4 = nn.Upsample((224, 224), mode = 'bilinear')
-        self.self_att4 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
+        #self.self_att4 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
         
         self.conv5 = Res_Conv(in_channels= medium_dim, out_channels= 3, kernel_size= (3, 3))
         self.conv6 = Res_Conv(in_channels= 3, out_channels= 3, kernel_size= (3, 3), activation= 'sigmoid')
@@ -69,20 +69,20 @@ class Decoder(nn.Module):
         upsam3 = self.upsam3(conv3)
     
         re_upsam3 = cha2fea(upsam3, self.medium_dim, 128)
-        att_out3, _ = self.self_att3(re_upsam3, re_upsam3, re_upsam3)
-        re_att_out3 = fea2cha(att_out3, self.medium_dim, 128) + upsam3
+        #att_out3, _ = self.self_att3(re_upsam3, re_upsam3, re_upsam3)
+        #re_att_out3 = fea2cha(att_out3, self.medium_dim, 128) + upsam3
 
-        conv4 = self.conv4(re_att_out3)
+        conv4 = self.conv4(upsam3)
         upsam4 = self.upsam4(conv4)
         
         re_upsam4 = cha2fea(upsam4, self.medium_dim, 224)
-        att_out4, _ = self.self_att4(re_upsam4, re_upsam4, re_upsam4)
-        re_att_out4 = fea2cha(att_out4, self.medium_dim, 224) + upsam4
+        #att_out4, _ = self.self_att4(re_upsam4, re_upsam4, re_upsam4)
+        #re_att_out4 = fea2cha(att_out4, self.medium_dim, 224) + upsam4
 
-        conv5 = self.conv5(re_att_out4)
-        conv6 = self.conv6(conv5)
+        conv5 = self.conv5(upsam4)
+        self.output = self.conv6(conv5)
         
-        return conv6
+        return self.output
         
         
         
