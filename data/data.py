@@ -24,7 +24,7 @@ class ImageSet(Dataset):
         )
         
     def __getitem__(self, index):
-        img = Image.open(self.path + self.img_lis[index])
+        img = Image.open(self.path + self.img_lis[index]).convert('RGB')
         return self.transform(img)
     
     def __len__(self):

@@ -118,7 +118,7 @@ if __name__ == '__main__':
         pass
        #generate_image(model_path, args.input_dim, device, args.num_images)
     else:
-        dataset = ImageSet('../data/imgs/')
+        dataset = ImageSet('example_data/')
         if not args.resume:
             model = VQ_VAE(args.token_siz, args.token_dim, args.medium_dim, args.dropout, args.num_heads)
             torch.save(model, model_path)
