@@ -103,6 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', action = 'store_true')
     parser.add_argument('--type', default = 'train', type = str)
     parser.add_argument('--test_path', default = 'test.txt', type = str)
+    parser.add_argument('--name', default = 'VQ_VAE', type = str)
     args = parser.parse_args()
     
     set_seed(args.seed)
@@ -110,7 +111,7 @@ if __name__ == '__main__':
 
     device = args.device
     
-    model_path = args.save_path + 'transformer.pkl'
+    model_path = args.save_path + args.name + '.pkl'
     
     if args.type == "test":
         
@@ -121,10 +122,10 @@ if __name__ == '__main__':
         if not args.resume:
             model = VQ_VAE(args.token_siz, args.token_dim, args.medium_dim, args.dropout, args.num_heads)
             torch.save(model, model_path)
+            log = open(args.log_path + args.name + '_train_logs. txt', 'w')
+        else:
+            log = open(args.log_path + args.name + '_train_logs. txt', 'w+')
+            log.write('resuming...' + '\n')
             
-        log = open(args.log_path + 'train_logs. txt', 'w')
-
-        
-
         train_model(model_path, dataset, batch_size = args.batch_size, 
                     num_epochs = args.epochs, lr = args.lr, device = device, log_file = log)

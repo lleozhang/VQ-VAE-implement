@@ -1,7 +1,5 @@
 import torch.nn as nn
 import torch
-from MLP import MLP
-from res_conv import Res_Conv
 
 def fea2cha(input, feature_dim, siz):
     '''
@@ -17,4 +15,4 @@ def cha2fea(input, feature_dim, siz):
         input: [bsz, C, H, W]
         output: [bsz, H*W, C]
     '''
-    return input.tranpose(1, 2).transpose(2, 3).view(-1, siz * siz, feature_dim)
+    return input.transpose(1, 2).transpose(2, 3).view(-1, siz * siz, feature_dim)

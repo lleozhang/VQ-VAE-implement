@@ -13,7 +13,7 @@ class ImageSet(Dataset):
         
         self.path = path
         self.img_lis = os.listdir(path)
-        self.len = len(self.lis)
+        self.len = len(self.img_lis)
         self.transform = Compose(
             [
                 Resize(256),

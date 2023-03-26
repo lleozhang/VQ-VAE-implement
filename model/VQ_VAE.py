@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from Encoder import Encoder
-from Decoder import Decoder
+from .Encoder import Encoder
+from .Decoder import Decoder
 
 class VQ_VAE(nn.Module):
     def __init__(self, token_size, token_dim, medium_dim, dropout, num_heads):
