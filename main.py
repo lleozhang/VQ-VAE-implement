@@ -33,7 +33,7 @@ def build_dir(log_path, save_path):
         pass
 
 def train_model(model_path, dataset, batch_size, num_epochs, 
-                        lr, device, log_file):
+                        lr, device, log_file, gpus = ['cuda:0', 'cuda:1']):
     
     model = torch.load(model_path).to(device)
     
@@ -43,15 +43,19 @@ def train_model(model_path, dataset, batch_size, num_epochs,
     criterion = nn.MSELoss()
     best_train = 1e10
     trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+    if device != 'cpu':
+        model = nn.DataParallel(model.cuda(), device_ids = gpus, output_device=device)
+    
     for epoch in trange(num_epochs):
         log_file.write(str(epoch)+':\n')
 
         total_train_loss = 0
 
         dataloader = DataLoader(dataset, batch_size = batch_size, 
-                                shuffle = True, drop_last = True)
+                                shuffle = True, drop_last = True, num_workers= 2)
         for input_img in tqdm(dataloader):
-            input_img = input_img.to(device)
+            if device != 'cpu':
+                input_img = input_img.cuda(non_blocking = True)
             output = model(trans(input_img))
             
             batch_loss = criterion(output, input_img)
