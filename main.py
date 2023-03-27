@@ -9,6 +9,7 @@ from tqdm import tqdm, trange
 from torch.utils.data import DataLoader
 import argparse
 import torch.nn as nn
+from torchvision.transforms import Normalize
 
 def set_seed(seed = 1008):
     random.seed(seed)
@@ -41,7 +42,7 @@ def train_model(model_path, dataset, batch_size, num_epochs,
     optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), lr = lr)
     criterion = nn.MSELoss()
     best_train = 1e10
-    
+    trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
     for epoch in trange(num_epochs):
         log_file.write(str(epoch)+':\n')
 
@@ -49,9 +50,9 @@ def train_model(model_path, dataset, batch_size, num_epochs,
 
         dataloader = DataLoader(dataset, batch_size = batch_size, 
                                 shuffle = True, drop_last = True)
-        for input_img in dataloader:
+        for input_img in tqdm(dataloader):
             input_img = input_img.to(device)
-            output = model(input_img)
+            output = model(trans(input_img))
             
             batch_loss = criterion(output, input_img)
             total_train_loss += batch_loss.item()
