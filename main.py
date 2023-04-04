@@ -40,7 +40,6 @@ def train_model(model_path, dataset, batch_size, num_epochs,
     model.train()
 
     optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), lr = lr)
-    criterion = nn.MSELoss()
     best_train = 1e10
     trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
     if device != 'cpu':
@@ -56,16 +55,12 @@ def train_model(model_path, dataset, batch_size, num_epochs,
         for input_img in tqdm(dataloader):
             if device != 'cpu':
                 input_img = input_img.cuda(non_blocking = True)
-            output = model(trans(input_img))
-            
-            batch_loss = criterion(output, input_img)
-            total_train_loss += batch_loss.item()
+            output, loss = model(trans(input_img))
+            total_train_loss += loss.item()
 
             #batch_loss = batch_loss.requires_grad_()
             optimizer.zero_grad()
-            model.enc_fea.retain_grad()
-            batch_loss.backward()
-            model.encoder.update(model.enc_fea.grad)
+            loss.backward()
             optimizer.step()
             
             
