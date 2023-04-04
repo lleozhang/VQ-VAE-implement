@@ -10,8 +10,13 @@ from torch.utils.data import DataLoader
 import argparse
 import torch.nn as nn
 from torchvision.transforms import Normalize
+import torch.distributed as dist
+from torchvision.utils import save_image
+
+#dist.init_process_group(backend='nccl')
 
 def set_seed(seed = 1008):
+    seed = np.random.randint(1, 10000)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -33,62 +38,69 @@ def build_dir(log_path, save_path):
         pass
 
 def train_model(model_path, dataset, batch_size, num_epochs, 
-                        lr, device, log_file, gpus = ['cuda:0', 'cuda:1']):
+                        lr, device, log_file, local_rank):
     
-    model = torch.load(model_path).to(device)
-    
+    model = torch.load(model_path, map_location = 'cpu')
     model.train()
-
+    Loss = nn.MSELoss()
     optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), lr = lr)
     best_train = 1e10
     trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+    train_sampler = None
     if device != 'cpu':
-        model = nn.DataParallel(model.cuda(), device_ids = gpus, output_device=device)
-    
+        torch.cuda.set_device(local_rank)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)   
+        model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids = [local_rank], find_unused_parameters=True)
+
     for epoch in trange(num_epochs):
+        train_sampler.set_epoch(epoch)
         log_file.write(str(epoch)+':\n')
 
         total_train_loss = 0
 
-        dataloader = DataLoader(dataset, batch_size = batch_size, 
+        if train_sampler:
+            dataloader = DataLoader(dataset, batch_size = batch_size, 
+                                drop_last = True, num_workers= 2, sampler = train_sampler)
+        else:
+            dataloader = DataLoader(dataset, batch_size = batch_size, 
                                 shuffle = True, drop_last = True, num_workers= 2)
+        
+        
         for input_img in tqdm(dataloader):
             if device != 'cpu':
                 input_img = input_img.cuda(non_blocking = True)
             output, loss = model(trans(input_img))
-            total_train_loss += loss.item()
-
-            #batch_loss = batch_loss.requires_grad_()
+            batch_loss = Loss(output, input_img) + loss.mean(dim = 0)
+            total_train_loss += batch_loss.item()
             optimizer.zero_grad()
-            loss.backward()
+            batch_loss.backward()
             optimizer.step()
-            
-            
 
+        
         if total_train_loss < best_train:
             best_train = total_train_loss
-            torch.save(model, model_path)
-        log_file.write('loss = ' + str(total_train_loss) + '\n')
+            torch.save(model.module, model_path)
+        if local_rank == 0:
+            print(total_train_loss)
+            log_file.write('loss = ' + str(total_train_loss) + '\n')
         #print(total_train_loss)
     
 
-def evaluate(model_path, input, device, tgt_tokenizer):
+def evaluate(model_path, dataset, device):
     model = torch.load(model_path)
     model = model.to(device)
     model.eval()
     with torch.no_grad():
-        prompt = [0 for _ in range(200)]
-        prompt[0] = tgt_tokenizer.word2id('<SOS>')
-        input = input.to(device).unsqueeze(0)
-        for i in range(1, 200):
-            tgt = torch.tensor(prompt).unsqueeze(0).to(device)
-            output = model(input, tgt, device).squeeze(0)[-1]
-            pred = output.argmax(dim = -1).item()
-            if(pred != 0):
-                prompt[i]=pred
-            else:
-                break
-        print(tgt_tokenizer.de_tokenize(prompt))
+        dataloader = DataLoader(dataset, batch_size = 1, 
+                                shuffle = True, drop_last = True)
+        trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+        for input_img in dataloader:
+            input_img = input_img.to(device)
+            output, loss = model(trans(input_img))
+            save_image(output.view(3, 224, 224).data, "gen.png" , nrow=1, normalize = True)
+            save_image(input_img.view(3, 224, 224).data, "ori.png", nrow = 1, normalize = True)
+            break 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'train')
@@ -108,6 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--type', default = 'train', type = str)
     parser.add_argument('--test_path', default = 'test.txt', type = str)
     parser.add_argument('--name', default = 'VQ_VAE', type = str)
+    parser.add_argument('--local_rank', default = -1, type = int)
     args = parser.parse_args()
     
     set_seed(args.seed)
@@ -118,9 +131,8 @@ if __name__ == '__main__':
     model_path = args.save_path + args.name + '.pkl'
     
     if args.type == "test":
-        
-        pass
-       #generate_image(model_path, args.input_dim, device, args.num_images)
+        dataset = ImageSet('example_data/')
+        evaluate(model_path, dataset, args.device)
     else:
         dataset = ImageSet('example_data/')
         if not args.resume:
@@ -132,4 +144,5 @@ if __name__ == '__main__':
             log.write('resuming...' + '\n')
             
         train_model(model_path, dataset, batch_size = args.batch_size, 
-                    num_epochs = args.epochs, lr = args.lr, device = device, log_file = log)
+                    num_epochs = args.epochs, lr = args.lr, device = device, 
+                    log_file = log, local_rank = args.local_rank)

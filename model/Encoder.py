@@ -37,22 +37,21 @@ class Encoder(nn.Module):
         
         #similarity between image and embedding tokens
         Sim =((img_quan ** 2).sum(dim = -1).view(-1, 1) 
-              - 2 * img_quan @ self.embedding.T()
+              - 2 * img_quan @ (self.embedding.transpose(0, 1))
               + (self.embedding ** 2).sum(dim = -1).view(1, -1))
         
         embedded_token = torch.argmin(Sim, dim = -1)
         embedded_feature = self.embedding[embedded_token]
         
         
-        if self.training:
-            embedded_loss = (self.loss(img_quan.detach(), embedded_feature) #VQ Loss
-                            + self.beta * self.loss(embedded_feature.detach(), img_quan)) #Commitment Loss
+        embedded_loss = (self.loss(img_quan.detach(), embedded_feature) #VQ Loss
+                        + self.beta * self.loss(embedded_feature.detach(), img_quan)) #Commitment Loss
         embedded_feature = embedded_feature.view(-1, 16 * 16, self.token_dim)
         
         #Loss backward
         embedded_feature = img_feature + (embedded_feature - img_feature).detach()
 
-        return embedded_token.view(-1, 16 * 16), embedded_feature, embedded_loss
+        return embedded_feature, embedded_loss
     
         
         
