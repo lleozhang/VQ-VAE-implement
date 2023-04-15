@@ -13,8 +13,6 @@ from torchvision.transforms import Normalize
 import torch.distributed as dist
 from torchvision.utils import save_image
 
-#dist.init_process_group(backend='nccl')
-
 def set_seed(seed = 1008):
     seed = np.random.randint(1, 10000)
     random.seed(seed)
@@ -37,70 +35,137 @@ def build_dir(log_path, save_path):
     except Exception as e:
         pass
 
-def train_model(model_path, dataset, batch_size, num_epochs, 
-                        lr, device, log_file, local_rank):
-    
-    model = torch.load(model_path, map_location = 'cpu')
-    model.train()
+def evaluate(model, dataset, device, epoch, log):
+    model.eval()
     Loss = nn.MSELoss()
-    optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), lr = lr)
+    total_loss = 0
+    with torch.no_grad():
+        dataloader = DataLoader(dataset, batch_size = 1, 
+                                shuffle = True, drop_last = True)
+        #trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+        flag = 1
+        for input_img in tqdm(dataloader):
+            input_img = input_img.to(device)
+            output, loss = model(input_img, 0)
+            batch_loss = Loss(output, input_img) + loss
+            total_loss += batch_loss.item()
+            if flag:
+                save_image(output.view(3, 224, 224).data, "saved_imgs/gen%d.png" % epoch , nrow=1, normalize = True)
+                save_image(input_img.view(3, 224, 224).data, "saved_imgs/ori%d.png" % epoch, nrow = 1, normalize = True)
+            flag = 0 
+    if log:
+        log.write('val loss: %f' % total_loss)
+    return total_loss
+
+
+def train_model(model, train_set, val_set, batch_size, num_epochs, 
+                    lr, device, log_path, local_rank, with_sync,
+                    resume_path, save_path):
+    
+    start_epoch = 0
+    best_val = 1e10
     best_train = 1e10
-    trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+    Loss = nn.MSELoss()
+    optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, model.parameters()), 
+                                 lr = lr)
+    if resume_path:
+        checkpoint = torch.load(resume_path, map_location = 'cpu')
+        start_epoch = checkpoint['epoch'] + 1
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
+        log_file = open(checkpoint['log_file'], 'w+')
+        best_val = checkpoint['val_loss']
+    else:
+        log_file = open(log_path, 'w')
+        resume_path = save_path + 'best.pth'
+    
+    #trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
     train_sampler = None
-    if device != 'cpu':
+    if with_sync:
         torch.cuda.set_device(local_rank)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)   
         model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids = [local_rank], find_unused_parameters=True)
-
-    for epoch in trange(num_epochs):
-        train_sampler.set_epoch(epoch)
+    
+    
+    for epoch in trange(start_epoch, start_epoch + num_epochs):
+        model.train()
+        model = model.to(device)
         log_file.write(str(epoch)+':\n')
 
         total_train_loss = 0
 
         if train_sampler:
-            dataloader = DataLoader(dataset, batch_size = batch_size, 
+            train_sampler.set_epoch(epoch)
+            dataloader = DataLoader(train_set, batch_size = batch_size, 
                                 drop_last = True, num_workers= 2, sampler = train_sampler)
         else:
-            dataloader = DataLoader(dataset, batch_size = batch_size, 
+            dataloader = DataLoader(train_set, batch_size = batch_size, 
                                 shuffle = True, drop_last = True, num_workers= 2)
         
-        
+        debug = 0
         for input_img in tqdm(dataloader):
-            if device != 'cpu':
+            if with_sync:
                 input_img = input_img.cuda(non_blocking = True)
-            output, loss = model(trans(input_img))
-            batch_loss = Loss(output, input_img) + loss.mean(dim = 0)
+            else:
+                model = model.to(device)
+                input_img = input_img.to(device)
+            output, loss = model(input_img, debug)
+            batch_loss = Loss(output, input_img) + loss
             total_train_loss += batch_loss.item()
             optimizer.zero_grad()
             batch_loss.backward()
             optimizer.step()
-
+            debug = 0
         
-        if total_train_loss < best_train:
-            best_train = total_train_loss
-            torch.save(model.module, model_path)
-        if local_rank == 0:
-            print(total_train_loss)
-            log_file.write('loss = ' + str(total_train_loss) + '\n')
-        #print(total_train_loss)
+        if with_sync:
+            if local_rank == 0:
+                val_loss = evaluate(model, val_set, device, epoch)
+        else:
+            val_loss = evaluate(model, val_set, device, epoch, log_file)
+        
+        if with_sync:
+            state = {
+                        'epoch' : epoch,
+                        'train_loss' : total_train_loss,
+                        'val_loss' : val_loss,
+                        'state_dict' : model.module.state_dict(),
+                        'optimizer' : optimizer.state_dict(),
+                        'log_file' : log_path,
+                    }
+        else:
+            state = {
+                        'epoch' : epoch,
+                        'train_loss' : total_train_loss,
+                        'val_loss' : val_loss,
+                        'state_dict' : model.state_dict(),
+                        'optimizer' : optimizer.state_dict(),
+                        'log_file' : log_path,
+                    }
+        if with_sync:
+            if local_rank == 0:
+                torch.save(state, save_path + str(epoch) + '.pth')
+        else:
+            torch.save(state, save_path + str(epoch) + '.pth')
+        
+        if val_loss < best_val:
+            best_val = val_loss
+            if with_sync:
+                if local_rank == 0:
+                    torch.save(state, resume_path)
+            else:
+                torch.save(state, resume_path)
     
-
-def evaluate(model_path, dataset, device):
-    model = torch.load(model_path)
-    model = model.to(device)
-    model.eval()
-    with torch.no_grad():
-        dataloader = DataLoader(dataset, batch_size = 1, 
-                                shuffle = True, drop_last = True)
-        trans = Normalize(mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
-        for input_img in dataloader:
-            input_img = input_img.to(device)
-            output, loss = model(trans(input_img))
-            save_image(output.view(3, 224, 224).data, "gen.png" , nrow=1, normalize = True)
-            save_image(input_img.view(3, 224, 224).data, "ori.png", nrow = 1, normalize = True)
-            break 
+        if with_sync:
+            if local_rank == 0:
+                log_file.write('train_loss = ' + str(total_train_loss) + '\n')
+        else:
+            log_file.write('train_loss = ' + str(total_train_loss) + '\n')
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'train')
@@ -115,34 +180,44 @@ if __name__ == '__main__':
     parser.add_argument('--medium_dim', default = 128, type = int)
     parser.add_argument('--device', default = 'cuda', type = str)
     parser.add_argument('--log_path', default = 'train_logs/', type = str)
-    parser.add_argument('--save_path', default = 'model_file/', type = str)
-    parser.add_argument('--resume', action = 'store_true')
     parser.add_argument('--type', default = 'train', type = str)
     parser.add_argument('--test_path', default = 'test.txt', type = str)
     parser.add_argument('--name', default = 'VQ_VAE', type = str)
     parser.add_argument('--local_rank', default = -1, type = int)
+    parser.add_argument('--with_sync', action = 'store_true')
+    parser.add_argument('--resume_type', default = None, type = str)
     args = parser.parse_args()
     
+    if args.with_sync:
+        dist.init_process_group(backend='nccl')
+    
     set_seed(args.seed)
-    build_dir(args.log_path, args.save_path)
 
     device = args.device
+    default_path = '/data/zhanghuixuan/multimodal_gen/model_file/'
     
-    model_path = args.save_path + args.name + '.pkl'
+    save_path = default_path + args.name
     
-    if args.type == "test":
-        dataset = ImageSet('example_data/')
-        evaluate(model_path, dataset, args.device)
+    if args.resume_type:
+        resume_path = save_path + args.resume_type + '.pth'
+    elif args.type == 'test':
+        resume_path = save_path + 'best' + '.pth'
     else:
-        dataset = ImageSet('example_data/')
-        if not args.resume:
-            model = VQ_VAE(args.token_siz, args.token_dim, args.medium_dim, args.dropout, args.num_heads)
-            torch.save(model, model_path)
-            log = open(args.log_path + args.name + '_train_logs. txt', 'w')
-        else:
-            log = open(args.log_path + args.name + '_train_logs. txt', 'w+')
-            log.write('resuming...' + '\n')
-            
-        train_model(model_path, dataset, batch_size = args.batch_size, 
+        resume_path = None
+
+    model = VQ_VAE(args.token_siz, args.token_dim, args.medium_dim, 
+                           args.dropout, args.num_heads)
+
+    if args.type == "test":
+        dataset = ImageSet('/data/zhanghuixuan/multimodal_gen/test_imgs/')
+        checkpoint = torch.load(resume_path)
+        model.load_state_dict(checkpoint['state_dict'])
+        evaluate(model, dataset, args.device, 0, None)
+    else:
+        train_set = ImageSet('/data/zhanghuixuan/multimodal_gen/train_imgs/')
+        val_set = ImageSet('/data/zhanghuixuan/multimodal_gen/valid_imgs/')
+        train_model(model, train_set, val_set, batch_size = args.batch_size, 
                     num_epochs = args.epochs, lr = args.lr, device = device, 
-                    log_file = log, local_rank = args.local_rank)
+                    log_path = args.log_path + args.name + '_train_logs.txt', 
+                    local_rank = args.local_rank, with_sync = args.with_sync, 
+                    resume_path =  resume_path, save_path = save_path)

@@ -17,12 +17,12 @@ class VQ_VAE(nn.Module):
         self.encoder = Encoder(token_size, token_dim)
         self.decoder = Decoder(token_dim, medium_dim, num_heads, dropout)
         
-    def forward(self, input):
+    def forward(self, input, debug):
         '''
             input is a batch of images
             input: [bsz, C, H, W], C = 3, H = W = 224
         '''
-        enc_fea, enc_loss = self.encoder(input)
+        enc_fea, enc_loss = self.encoder(input, debug)
 
         output = self.decoder(enc_fea)
         return output, enc_loss

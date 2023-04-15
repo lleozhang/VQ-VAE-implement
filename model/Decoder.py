@@ -13,29 +13,38 @@ class Decoder(nn.Module):
             dropout: dropout        
         '''
         nn.Module.__init__(self)
-        self.self_att = nn.MultiheadAttention(token_dim, num_heads, dropout, batch_first = True)
+        self.self_att = nn.MultiheadAttention(token_dim, num_heads, 
+                                              dropout, batch_first = True)
 
         self.token_dim = token_dim
         self.medium_dim = medium_dim
         
-        self.conv1 = Res_Conv(in_channels= token_dim, out_channels= token_dim, kernel_size= (5, 5))
+        self.conv1 = Res_Conv(in_channels= token_dim, out_channels= token_dim, 
+                              kernel_size= (3, 3), activation = 'leakyrelu')
         self.upsam1 = nn.Upsample((32, 32), mode = 'bilinear')
-        self.self_att1 = nn.MultiheadAttention(token_dim, num_heads, dropout, batch_first = True)
+        self.self_att1 = nn.MultiheadAttention(token_dim, num_heads, 
+                                               dropout, batch_first = True)
         
-        self.conv2 = Res_Conv(in_channels= token_dim, out_channels= medium_dim, kernel_size= (5, 5))
+        self.conv2 = Res_Conv(in_channels= token_dim, out_channels= medium_dim, 
+                              kernel_size= (3, 3), activation = 'leakyrelu')
         self.upsam2 = nn.Upsample((64, 64), mode = 'bilinear')
-        self.self_att2 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
+        self.self_att2 = nn.MultiheadAttention(medium_dim, num_heads, 
+                                               dropout, batch_first = True)
         
-        self.conv3 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
+        self.conv3 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, 
+                              kernel_size= (3, 3), activation = 'leakyrelu')
         self.upsam3 = nn.Upsample((128, 128), mode = 'bilinear')
         #self.self_att3 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
         
-        self.conv4 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, kernel_size= (3, 3))
+        self.conv4 = Res_Conv(in_channels= medium_dim, out_channels= medium_dim, 
+                              kernel_size= (3, 3), activation = 'leakyrelu')
         self.upsam4 = nn.Upsample((224, 224), mode = 'bilinear')
         #self.self_att4 = nn.MultiheadAttention(medium_dim, num_heads, dropout, batch_first = True)
         
-        self.conv5 = Res_Conv(in_channels= medium_dim, out_channels= 3, kernel_size= (3, 3))
-        self.conv6 = Res_Conv(in_channels= 3, out_channels= 3, kernel_size= (3, 3), activation= 'sigmoid')
+        self.conv5 = Res_Conv(in_channels= medium_dim, out_channels= 3, 
+                              kernel_size= (3, 3), activation = 'leakyrelu')
+        self.conv6 = nn.Conv2d(in_channels= 3, out_channels= 3, kernel_size= (3, 3), padding= 1)
+        self.act = nn.Sigmoid()
         
     def forward(self, input):
         '''
@@ -80,9 +89,10 @@ class Decoder(nn.Module):
         #re_att_out4 = fea2cha(att_out4, self.medium_dim, 224) + upsam4
 
         conv5 = self.conv5(upsam4)
-        self.output = self.conv6(conv5)
+        conv6 = self.conv6(conv5)
+        output = self.act(conv5 + conv6)
         
-        return self.output
+        return output
         
         
         
